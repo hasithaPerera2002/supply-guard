@@ -1,0 +1,13 @@
+[package]
+name = "supplyguard-tests"
+version = "0.1.0"
+edition = "2021"
+
+[[test]]
+name = "integration_tests"
+path = "integration_tests.rs"
+
+[dependencies]
+scanner = { path = "../crates/scanner" }
+tempfile = "3.10"
+tokio = { version = "1.40", features = ["full"] }

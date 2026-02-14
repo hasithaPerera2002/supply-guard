@@ -1,0 +1,10 @@
+[package]
+name = "notifier"
+version = "0.1.0"
+edition = "2021"
+
+[dependencies]
+shared = { path = "../shared" }
+notify-rust = { workspace = true }
+tracing = { workspace = true }
+thiserror = { workspace = true }
