@@ -198,6 +198,8 @@ async fn start_daemon() -> anyhow::Result<()> {
             info!("Daemon already running with PID {}", pid);
             return Ok(());
         }
+        // Stale PID file from a previous crash/exit
+        remove_pid_file()?;
     }
 
     // Load config

@@ -3,6 +3,15 @@ use crate::Severity;
 use serde::{Deserialize, Serialize};
 use std::path::PathBuf;
 
+fn supplyguard_base_dir() -> PathBuf {
+    // When running under launchd (especially LaunchDaemons), HOME is often unset.
+    // Fall back to a system location that is writable by root.
+    match std::env::var("HOME") {
+        Ok(home) if !home.trim().is_empty() => PathBuf::from(home).join(".supplyguard"),
+        _ => PathBuf::from("/var/db/supplyguard"),
+    }
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Config {
     pub monitoring: MonitoringConfig,
@@ -45,7 +54,8 @@ pub struct DatabaseConfig {
 
 impl Config {
     pub fn default() -> Self {
-        let home = std::env::var("HOME").unwrap_or_else(|_| "~".to_string());
+        let home = std::env::var("HOME").unwrap_or_else(|_| "/var/root".to_string());
+        let base_dir = supplyguard_base_dir();
         
         Self {
             monitoring: MonitoringConfig {
@@ -75,10 +85,16 @@ impl Config {
             quarantine: QuarantineConfig {
                 enabled: true,
                 auto_quarantine_severity: "Critical".to_string(),
-                path: format!("{}/.supplyguard/quarantine", home),
+                path: base_dir
+                    .join("quarantine")
+                    .to_string_lossy()
+                    .into_owned(),
             },
             database: DatabaseConfig {
-                path: format!("{}/.supplyguard/threats.db", home),
+                path: base_dir
+                    .join("threats.db")
+                    .to_string_lossy()
+                    .into_owned(),
             },
         }
     }
@@ -119,9 +135,13 @@ impl Config {
     }
 
     pub fn config_path() -> Result<PathBuf, ConfigError> {
-        let home = std::env::var("HOME")
-            .map_err(|_| ConfigError::IoError("HOME environment variable not set".to_string()))?;
-        Ok(PathBuf::from(home).join(".supplyguard").join("config.toml"))
+        if let Ok(p) = std::env::var("SUPPLYGUARD_CONFIG") {
+            if !p.trim().is_empty() {
+                return Ok(PathBuf::from(p));
+            }
+        }
+
+        Ok(supplyguard_base_dir().join("config.toml"))
     }
 
     pub fn min_notification_severity(&self) -> Severity {
@@ -135,7 +155,7 @@ impl Config {
     }
 
     pub fn expand_paths(&self) -> Vec<PathBuf> {
-        let home = std::env::var("HOME").unwrap_or_else(|_| "~".to_string());
+        let home = std::env::var("HOME").unwrap_or_else(|_| "/var/root".to_string());
         self.monitoring.watch_paths
             .iter()
             .map(|p| {
@@ -146,13 +166,13 @@ impl Config {
     }
 
     pub fn quarantine_path(&self) -> PathBuf {
-        let home = std::env::var("HOME").unwrap_or_else(|_| "~".to_string());
+        let home = std::env::var("HOME").unwrap_or_else(|_| "/var/root".to_string());
         let expanded = self.quarantine.path.replace("~", &home);
         PathBuf::from(expanded)
     }
 
     pub fn database_path(&self) -> PathBuf {
-        let home = std::env::var("HOME").unwrap_or_else(|_| "~".to_string());
+        let home = std::env::var("HOME").unwrap_or_else(|_| "/var/root".to_string());
         let expanded = self.database.path.replace("~", &home);
         PathBuf::from(expanded)
     }

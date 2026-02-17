@@ -76,7 +76,11 @@ impl FileWatcher {
         for path in paths {
             if path.exists() {
                 info!("Watching path: {}", path.display());
-                watcher_ref.watch(&path, RecursiveMode::Recursive)?;
+                if let Err(e) = watcher_ref.watch(&path, RecursiveMode::Recursive) {
+                    // On macOS this can fail due to TCC/privacy permissions (even as root under launchd).
+                    // Don't crash the whole daemon; just skip paths we can't watch.
+                    warn!("Failed to watch {}: {}", path.display(), e);
+                }
             } else {
                 warn!("Path does not exist, skipping: {}", path.display());
             }
