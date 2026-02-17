@@ -2,6 +2,7 @@ pub mod vscode;
 pub mod git_hooks;
 pub mod package_json;
 pub mod shell;
+pub mod shell_config;
 pub mod cargo;
 pub mod python;
 pub mod ci;
@@ -25,6 +26,7 @@ pub fn all_detectors() -> Vec<Box<dyn Detector>> {
         Box::new(git_hooks::GitHooksDetector),
         Box::new(package_json::PackageJsonDetector),
         Box::new(shell::ShellDetector),
+        Box::new(shell_config::ShellConfigDetector),
         Box::new(cargo::CargoDetector),
         Box::new(python::PythonDetector),
         Box::new(ci::CiDetector),

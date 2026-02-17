@@ -57,6 +57,17 @@ impl ScannerEngine {
         
         let path_str = path.to_string_lossy().to_lowercase();
         
+        // Check if it's a shell config file
+        let is_shell_config = {
+            let file_name = path.file_name().and_then(|n| n.to_str()).unwrap_or("");
+            let path_str_lower = path_str.to_lowercase();
+            file_name == ".zshrc" || file_name == ".bashrc" || file_name == ".bash_profile" ||
+            file_name == ".profile" || file_name == ".zprofile" ||
+            path_str_lower.contains("/.zshrc") || path_str_lower.contains("/.bashrc") ||
+            path_str_lower.contains("/.bash_profile") || path_str_lower.contains("/.profile") ||
+            path_str_lower.contains("/.zprofile") || path_str_lower.contains("/.config/fish/config.fish")
+        };
+
         let applicable_detectors: Vec<&Box<dyn Detector>> = self.detectors
             .iter()
             .filter(|detector| {
@@ -68,7 +79,8 @@ impl ScannerEngine {
                 path.file_name() == Some(std::ffi::OsStr::new("build.rs")) ||
                 path.file_name() == Some(std::ffi::OsStr::new("setup.py")) ||
                 path_str.contains(".github/workflows") ||
-                path_str.contains(".gitlab-ci.yml")
+                path_str.contains(".gitlab-ci.yml") ||
+                is_shell_config
             })
             .collect();
 

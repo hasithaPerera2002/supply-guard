@@ -63,6 +63,13 @@ impl Config {
                     format!("{}/Projects", home),
                     format!("{}/Downloads", home),
                     format!("{}/Developer", home),
+                    // Shell config files for poisoning attack detection
+                    format!("{}/.zshrc", home),
+                    format!("{}/.bashrc", home),
+                    format!("{}/.bash_profile", home),
+                    format!("{}/.profile", home),
+                    format!("{}/.zprofile", home),
+                    format!("{}/.config/fish/config.fish", home),
                 ],
                 ignored_paths: vec![
                     "node_modules".to_string(),
