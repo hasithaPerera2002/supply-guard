@@ -58,6 +58,59 @@ sudo launchctl load /Library/LaunchDaemons/com.supplyguard.daemon.plist
 sudo launchctl start com.supplyguard.daemon
 ```
 
+## Uninstallation
+
+### Quick Uninstall
+
+To remove SupplyGuard completely:
+
+```bash
+./uninstall.sh
+```
+
+This will:
+- Stop and unload the daemon
+- Remove the binary from `/usr/local/bin/supplyguard`
+- Remove the launchd plist file
+- Remove log files from `/var/log/supplyguard`
+- **Preserve** user data in `~/.supplyguard` (config, database, quarantine)
+
+### Complete Removal
+
+To remove SupplyGuard **and all user data** (config, threat database, quarantined files):
+
+```bash
+# Run uninstall script
+./uninstall.sh
+
+# Remove user data directory
+rm -rf ~/.supplyguard
+```
+
+### Manual Uninstallation
+
+If you prefer to uninstall manually:
+
+```bash
+# Stop and unload daemon
+sudo launchctl stop com.supplyguard.daemon
+sudo launchctl unload /Library/LaunchDaemons/com.supplyguard.daemon.plist
+
+# Remove binary
+sudo rm -f /usr/local/bin/supplyguard
+
+# Remove launchd plist
+sudo rm -f /Library/LaunchDaemons/com.supplyguard.daemon.plist
+
+# Remove log files
+sudo rm -rf /var/log/supplyguard
+
+# Optional: Remove user data (config, database, quarantine)
+rm -rf ~/.supplyguard
+```
+
+**Note**: The uninstall script preserves your configuration, threat database, and quarantined files in `~/.supplyguard`. If you want to completely remove all traces of SupplyGuard, manually delete `~/.supplyguard` after running the uninstall script.
+
 ## Usage
 
 ### CLI Commands
