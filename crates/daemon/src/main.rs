@@ -105,21 +105,28 @@ async fn main() {
 
     let cli = Cli::parse();
 
-    // Initialize logging with explicit flushing
-    let subscriber = tracing_subscriber::fmt()
+    // Initialize logging - ensure it writes to stderr (which launchd captures)
+    tracing_subscriber::fmt()
         .with_env_filter(EnvFilter::from_default_env())
-        .with_writer(std::io::stderr) // Ensure logs go to stderr (which launchd captures)
-        .finish();
-    tracing::subscriber::set_global_default(subscriber)
-        .expect("Failed to set tracing subscriber");
+        .with_writer(std::io::stderr)
+        .init();
     
-    // Force flush stderr to ensure logs are written
+    // Force flush stderr to ensure logs are written immediately
     use std::io::Write;
     let _ = std::io::stderr().flush();
+    
+    // Log immediately to verify logging works
+    eprintln!("=== SupplyGuard starting ===");
+    eprintln!("PID: {}", std::process::id());
+    eprintln!("About to call info! macro...");
+    info!("SupplyGuard daemon process starting (PID: {})", std::process::id());
+    eprintln!("info! macro called, entering match statement...");
 
     match cli.command {
         Commands::Start => {
+            eprintln!("Command: Start - about to call start_daemon()");
             info!("Starting SupplyGuard daemon...");
+            eprintln!("Calling start_daemon().await...");
             match start_daemon().await {
                 Ok(()) => {
                     info!("Daemon exited normally");
@@ -213,40 +220,64 @@ async fn main() {
 }
 
 async fn start_daemon() -> anyhow::Result<()> {
+    eprintln!("start_daemon() called");
     info!("=== SupplyGuard daemon startup beginning ===");
+    eprintln!("About to check PID file...");
     
     // Check if already running
-    if let Ok(pid) = read_pid_file() {
-        if is_process_running(pid) {
-            info!("Daemon already running with PID {}", pid);
-            return Ok(());
+    eprintln!("Calling read_pid_file()...");
+    match read_pid_file() {
+        Ok(pid) => {
+            eprintln!("PID file found, PID: {}", pid);
+            eprintln!("Checking if process is running...");
+            if is_process_running(pid) {
+                eprintln!("Process {} is already running", pid);
+                info!("Daemon already running with PID {}", pid);
+                return Ok(());
+            }
+            // Stale PID file from a previous crash/exit
+            eprintln!("Process {} is not running, removing stale PID file", pid);
+            info!("Removing stale PID file");
+            remove_pid_file()?;
         }
-        // Stale PID file from a previous crash/exit
-        info!("Removing stale PID file");
-        remove_pid_file()?;
+        Err(e) => {
+            eprintln!("No PID file found (or error reading): {}", e);
+            // This is fine - no existing daemon
+        }
     }
+    eprintln!("PID file check complete, continuing startup...");
 
     info!("Loading configuration...");
+    eprintln!("About to call Config::load()...");
     // Load config
     let config = Config::load()?;
+    eprintln!("Config loaded successfully");
     info!("Configuration loaded successfully");
 
     // Initialize database
     info!("Initializing databases at: {}", config.database_path().display());
+    eprintln!("About to initialize threat database...");
     let db_path = config.database_path();
     let threat_db = std::sync::Arc::new(ThreatDatabase::new(&db_path)?);
+    eprintln!("Threat database initialized");
     info!("Threat database initialized");
+    eprintln!("About to initialize cache database...");
     let cache_db = std::sync::Arc::new(CacheDatabase::new(&db_path)?);
+    eprintln!("Cache database initialized");
     info!("Cache database initialized");
 
     // Initialize scanner
+    eprintln!("About to initialize scanner...");
     let scanner = std::sync::Arc::new(ScannerEngine::new(config.scanning.max_file_size_mb));
+    eprintln!("Scanner initialized");
 
     // Initialize notifier
+    eprintln!("About to initialize notifier...");
     let notifier = std::sync::Arc::new(MacOSNotifier::new(
         config.notifications.enabled,
         config.min_notification_severity(),
     ));
+    eprintln!("Notifier initialized");
 
     // Create event channel
     let (event_tx, event_rx) = async_channel::unbounded();
@@ -256,15 +287,23 @@ async fn start_daemon() -> anyhow::Result<()> {
 
     // Setup signal handlers
     info!("Setting up signal handlers...");
+    eprintln!("About to set up signal handlers...");
     signals::setup_shutdown_handler(shutdown_tx.clone())?;
+    eprintln!("Signal handlers set up successfully");
     info!("Signal handlers set up successfully");
 
     // Create watcher
+    eprintln!("About to create file watcher...");
     let watcher = FileWatcher::new(event_tx.clone(), config.monitoring.ignored_paths.clone());
+    eprintln!("File watcher created, about to watch paths...");
     let watch_paths = config.expand_paths();
+    eprintln!("Got {} paths to watch", watch_paths.len());
     if let Err(e) = watcher.watch_paths(watch_paths).await {
         // Don't fail startup if watching fails - daemon can still do manual scans
+        eprintln!("Failed to set up file watching: {}", e);
         warn!("Failed to set up file watching: {}. Daemon will continue without automatic monitoring.", e);
+    } else {
+        eprintln!("File watching set up successfully");
     }
 
     // Write PID file
@@ -485,8 +524,12 @@ fn pid_file_path() -> PathBuf {
 }
 
 fn read_pid_file() -> anyhow::Result<i32> {
-    let pid_str = fs::read_to_string(pid_file_path())?;
-    Ok(pid_str.trim().parse()?)
+    let path = pid_file_path();
+    let pid_str = fs::read_to_string(&path)
+        .map_err(|e| anyhow::anyhow!("Failed to read PID file {}: {}", path.display(), e))?;
+    let pid = pid_str.trim().parse::<i32>()
+        .map_err(|e| anyhow::anyhow!("Failed to parse PID from '{}': {}", pid_str.trim(), e))?;
+    Ok(pid)
 }
 
 fn write_pid_file() -> anyhow::Result<()> {
@@ -501,7 +544,13 @@ fn remove_pid_file() -> anyhow::Result<()> {
 }
 
 fn is_process_running(pid: i32) -> bool {
+    if pid <= 0 {
+        return false;
+    }
     unsafe {
-        libc::kill(pid, 0) == 0
+        // kill(pid, 0) checks if process exists
+        // Returns 0 if process exists, -1 with errno if it doesn't
+        let result = libc::kill(pid, 0);
+        result == 0
     }
 }
