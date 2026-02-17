@@ -63,6 +63,20 @@ enum Commands {
     Install,
     /// Uninstall launchd daemon
     Uninstall,
+    /// Scan a package before installation
+    ScanPackage {
+        #[arg(value_name = "MANAGER")]
+        manager: String,
+        #[arg(value_name = "PACKAGE")]
+        package: String,
+        #[arg(value_name = "VERSION")]
+        version: Option<String>,
+    },
+    /// Manage package manager interception
+    Intercept {
+        #[command(subcommand)]
+        cmd: InterceptCommands,
+    },
 }
 
 #[derive(Subcommand)]
@@ -93,6 +107,16 @@ enum ConfigCommands {
     Show,
     /// Initialize default configuration
     Init,
+}
+
+#[derive(Subcommand)]
+enum InterceptCommands {
+    /// Enable package manager interception
+    Enable,
+    /// Disable package manager interception
+    Disable,
+    /// Show interception status
+    Status,
 }
 
 fn print_logo() {
@@ -247,6 +271,34 @@ async fn main() {
             if let Err(e) = uninstall_daemon().await {
                 error!("Failed to uninstall: {}", e);
                 process::exit(1);
+            }
+        }
+        Commands::ScanPackage { manager, package, version } => {
+            if let Err(e) = scan_package(manager, package, version).await {
+                error!("Failed to scan package: {}", e);
+                process::exit(1);
+            }
+        }
+        Commands::Intercept { cmd } => {
+            match cmd {
+                InterceptCommands::Enable => {
+                    if let Err(e) = enable_interception().await {
+                        error!("Failed to enable interception: {}", e);
+                        process::exit(1);
+                    }
+                }
+                InterceptCommands::Disable => {
+                    if let Err(e) = disable_interception().await {
+                        error!("Failed to disable interception: {}", e);
+                        process::exit(1);
+                    }
+                }
+                InterceptCommands::Status => {
+                    if let Err(e) = show_intercept_status().await {
+                        error!("Failed to show interception status: {}", e);
+                        process::exit(1);
+                    }
+                }
             }
         }
     }
@@ -616,6 +668,174 @@ async fn install_daemon() -> anyhow::Result<()> {
 
 async fn uninstall_daemon() -> anyhow::Result<()> {
     println!("Uninstall functionality - use uninstall.sh script");
+    Ok(())
+}
+
+async fn scan_package(manager: String, package: String, version: Option<String>) -> anyhow::Result<()> {
+    use scanner::{PackageScanner, PackageManager as PM};
+    
+    let pm = PM::from_str(&manager)
+        .ok_or_else(|| anyhow::anyhow!("Unknown package manager: {}. Supported: npm, pip, cargo", manager))?;
+    
+    let scanner = PackageScanner::new();
+    let threats = scanner.scan_package(pm, &package, version.as_deref()).await
+        .map_err(|e| anyhow::anyhow!("Package scan failed: {}", e))?;
+    
+    if threats.is_empty() {
+        println!("\x1b[32m✓ Package is clean - no threats detected\x1b[0m");
+        Ok(())
+    } else {
+        println!("\x1b[31m✗ Found {} threat(s) in package:\x1b[0m", threats.len());
+        for threat in &threats {
+            println!("  \x1b[33m[{}]\x1b[0m {}: {}", 
+                match threat.severity {
+                    shared::Severity::Critical => "\x1b[31mCRITICAL\x1b[0m",
+                    shared::Severity::High => "\x1b[33mHIGH\x1b[0m",
+                    shared::Severity::Medium => "\x1b[35mMEDIUM\x1b[0m",
+                    shared::Severity::Low => "\x1b[36mLOW\x1b[0m",
+                },
+                threat.pattern_name,
+                threat.context
+            );
+            if let Some(line) = threat.line_number {
+                println!("    Line {}: {}", line, threat.matched_pattern);
+            }
+            println!("    Remediation: {}", threat.remediation);
+        }
+        Err(anyhow::anyhow!("Package contains threats"))
+    }
+}
+
+async fn enable_interception() -> anyhow::Result<()> {
+    use std::fs;
+    use std::os::unix::fs::PermissionsExt;
+    
+    let wrapper_dir = PathBuf::from("/usr/local/bin");
+    fs::create_dir_all(&wrapper_dir)?;
+    
+    // Create wrapper scripts
+    let npm_wrapper = wrapper_dir.join("npm");
+    let pip_wrapper = wrapper_dir.join("pip");
+    let cargo_wrapper = wrapper_dir.join("cargo");
+    
+    // Create npm wrapper
+    let npm_script = include_str!("wrappers/npm.sh");
+    fs::write(&npm_wrapper, npm_script)?;
+    fs::set_permissions(&npm_wrapper, fs::Permissions::from_mode(0o755))?;
+    
+    // Create pip wrapper
+    let pip_script = include_str!("wrappers/pip.sh");
+    fs::write(&pip_wrapper, pip_script)?;
+    fs::set_permissions(&pip_wrapper, fs::Permissions::from_mode(0o755))?;
+    
+    // Create cargo wrapper
+    let cargo_script = include_str!("wrappers/cargo.sh");
+    fs::write(&cargo_wrapper, cargo_script)?;
+    fs::set_permissions(&cargo_wrapper, fs::Permissions::from_mode(0o755))?;
+    
+    // Update shell configs to prepend /usr/local/bin to PATH
+    update_shell_path(true)?;
+    
+    println!("\x1b[32m✓ Package manager interception enabled\x1b[0m");
+    println!("  Wrappers installed to /usr/local/bin");
+    println!("  Please restart your shell or run: source ~/.zshrc (or ~/.bashrc)");
+    
+    Ok(())
+}
+
+async fn disable_interception() -> anyhow::Result<()> {
+    use std::fs;
+    
+    let wrapper_dir = PathBuf::from("/usr/local/bin");
+    
+    // Remove wrapper scripts
+    let npm_wrapper = wrapper_dir.join("npm");
+    let pip_wrapper = wrapper_dir.join("pip");
+    let cargo_wrapper = wrapper_dir.join("cargo");
+    
+    if npm_wrapper.exists() {
+        fs::remove_file(&npm_wrapper)?;
+    }
+    if pip_wrapper.exists() {
+        fs::remove_file(&pip_wrapper)?;
+    }
+    if cargo_wrapper.exists() {
+        fs::remove_file(&cargo_wrapper)?;
+    }
+    
+    // Remove PATH modifications
+    update_shell_path(false)?;
+    
+    println!("\x1b[32m✓ Package manager interception disabled\x1b[0m");
+    println!("  Wrappers removed from /usr/local/bin");
+    println!("  Please restart your shell or run: source ~/.zshrc (or ~/.bashrc)");
+    
+    Ok(())
+}
+
+async fn show_intercept_status() -> anyhow::Result<()> {
+    use std::fs;
+    
+    let wrapper_dir = PathBuf::from("/usr/local/bin");
+    let npm_wrapper = wrapper_dir.join("npm");
+    let pip_wrapper = wrapper_dir.join("pip");
+    let cargo_wrapper = wrapper_dir.join("cargo");
+    
+    let npm_enabled = npm_wrapper.exists() && 
+        fs::read_to_string(&npm_wrapper).unwrap_or_default().contains("supplyguard");
+    let pip_enabled = pip_wrapper.exists() && 
+        fs::read_to_string(&pip_wrapper).unwrap_or_default().contains("supplyguard");
+    let cargo_enabled = cargo_wrapper.exists() && 
+        fs::read_to_string(&cargo_wrapper).unwrap_or_default().contains("supplyguard");
+    
+    println!("Package Manager Interception Status:");
+    println!("  npm:   {}", if npm_enabled { "\x1b[32m✓ Enabled\x1b[0m" } else { "\x1b[31m✗ Disabled\x1b[0m" });
+    println!("  pip:   {}", if pip_enabled { "\x1b[32m✓ Enabled\x1b[0m" } else { "\x1b[31m✗ Disabled\x1b[0m" });
+    println!("  cargo: {}", if cargo_enabled { "\x1b[32m✓ Enabled\x1b[0m" } else { "\x1b[31m✗ Disabled\x1b[0m" });
+    
+    Ok(())
+}
+
+fn update_shell_path(enable: bool) -> anyhow::Result<()> {
+    use std::fs;
+    
+    let home = std::env::var("HOME")
+        .ok_or_else(|| anyhow::anyhow!("HOME environment variable not set"))?;
+    
+    let shell_configs = vec![
+        PathBuf::from(&home).join(".zshrc"),
+        PathBuf::from(&home).join(".bashrc"),
+        PathBuf::from(&home).join(".bash_profile"),
+        PathBuf::from(&home).join(".profile"),
+    ];
+    
+    let path_line = "export PATH=\"/usr/local/bin:$PATH\"  # SupplyGuard interception\n";
+    
+    for config_path in shell_configs {
+        if !config_path.exists() {
+            continue;
+        }
+        
+        let content = fs::read_to_string(&config_path)?;
+        
+        if enable {
+            if !content.contains("SupplyGuard interception") {
+                let mut new_content = content.clone();
+                new_content.push_str(path_line);
+                fs::write(&config_path, new_content)?;
+            }
+        } else {
+            let new_content: String = content
+                .lines()
+                .filter(|line| !line.contains("SupplyGuard interception"))
+                .collect::<Vec<_>>()
+                .join("\n");
+            if new_content != content {
+                fs::write(&config_path, new_content)?;
+            }
+        }
+    }
+    
     Ok(())
 }
 
