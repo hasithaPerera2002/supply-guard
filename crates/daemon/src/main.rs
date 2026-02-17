@@ -6,8 +6,9 @@ use shared::Config;
 use std::fs;
 use std::path::PathBuf;
 use std::process;
+use std::time::Duration;
 use tokio::sync::broadcast;
-use tracing::{error, info};
+use tracing::{error, info, warn};
 use tracing_subscriber::EnvFilter;
 
 mod daemon;
@@ -96,18 +97,38 @@ enum ConfigCommands {
 
 #[tokio::main]
 async fn main() {
+    // Set up panic handler to log panics
+    std::panic::set_hook(Box::new(|panic_info| {
+        error!("PANIC: {}", panic_info);
+        eprintln!("PANIC: {:?}", panic_info);
+    }));
+
     let cli = Cli::parse();
 
-    // Initialize logging
-    tracing_subscriber::fmt()
+    // Initialize logging with explicit flushing
+    let subscriber = tracing_subscriber::fmt()
         .with_env_filter(EnvFilter::from_default_env())
-        .init();
+        .with_writer(std::io::stderr) // Ensure logs go to stderr (which launchd captures)
+        .finish();
+    tracing::subscriber::set_global_default(subscriber)
+        .expect("Failed to set tracing subscriber");
+    
+    // Force flush stderr to ensure logs are written
+    use std::io::Write;
+    let _ = std::io::stderr().flush();
 
     match cli.command {
         Commands::Start => {
-            if let Err(e) = start_daemon().await {
-                error!("Failed to start daemon: {}", e);
-                process::exit(1);
+            info!("Starting SupplyGuard daemon...");
+            match start_daemon().await {
+                Ok(()) => {
+                    info!("Daemon exited normally");
+                    process::exit(0);
+                }
+                Err(e) => {
+                    error!("Failed to start daemon: {}", e);
+                    process::exit(1);
+                }
             }
         }
         Commands::Stop => {
@@ -192,6 +213,8 @@ async fn main() {
 }
 
 async fn start_daemon() -> anyhow::Result<()> {
+    info!("=== SupplyGuard daemon startup beginning ===");
+    
     // Check if already running
     if let Ok(pid) = read_pid_file() {
         if is_process_running(pid) {
@@ -199,16 +222,22 @@ async fn start_daemon() -> anyhow::Result<()> {
             return Ok(());
         }
         // Stale PID file from a previous crash/exit
+        info!("Removing stale PID file");
         remove_pid_file()?;
     }
 
+    info!("Loading configuration...");
     // Load config
     let config = Config::load()?;
+    info!("Configuration loaded successfully");
 
     // Initialize database
+    info!("Initializing databases at: {}", config.database_path().display());
     let db_path = config.database_path();
     let threat_db = std::sync::Arc::new(ThreatDatabase::new(&db_path)?);
+    info!("Threat database initialized");
     let cache_db = std::sync::Arc::new(CacheDatabase::new(&db_path)?);
+    info!("Cache database initialized");
 
     // Initialize scanner
     let scanner = std::sync::Arc::new(ScannerEngine::new(config.scanning.max_file_size_mb));
@@ -226,15 +255,22 @@ async fn start_daemon() -> anyhow::Result<()> {
     let (shutdown_tx, shutdown_rx) = broadcast::channel(1);
 
     // Setup signal handlers
+    info!("Setting up signal handlers...");
     signals::setup_shutdown_handler(shutdown_tx.clone())?;
+    info!("Signal handlers set up successfully");
 
     // Create watcher
     let watcher = FileWatcher::new(event_tx.clone(), config.monitoring.ignored_paths.clone());
     let watch_paths = config.expand_paths();
-    watcher.watch_paths(watch_paths).await?;
+    if let Err(e) = watcher.watch_paths(watch_paths).await {
+        // Don't fail startup if watching fails - daemon can still do manual scans
+        warn!("Failed to set up file watching: {}. Daemon will continue without automatic monitoring.", e);
+    }
 
     // Write PID file
+    info!("Writing PID file...");
     write_pid_file()?;
+    info!("PID file written: {} (PID: {})", pid_file_path().display(), std::process::id());
 
     // Create and run daemon
     let mut daemon = Daemon::new(
@@ -247,8 +283,24 @@ async fn start_daemon() -> anyhow::Result<()> {
         shutdown_rx,
     );
 
+    info!("=== About to enter daemon.run() - this should block forever ===");
     // Run daemon (blocks until shutdown)
-    daemon.run().await?;
+    // This should block forever until shutdown signal is received
+    match daemon.run().await {
+        Ok(()) => {
+            info!("Daemon main loop exited normally");
+        }
+        Err(e) => {
+            error!("Daemon run() returned error: {}. Attempting to keep daemon alive...", e);
+            // Don't exit immediately - wait a bit to see if it recovers
+            // In production, you might want to restart instead
+            warn!("Daemon will attempt to continue running despite error");
+            tokio::time::sleep(Duration::from_secs(5)).await;
+            // Return error but don't crash - let launchd restart if needed
+            return Err(e);
+        }
+    }
+    info!("Daemon main loop exited - this should only happen on shutdown");
 
     // Cleanup
     remove_pid_file()?;

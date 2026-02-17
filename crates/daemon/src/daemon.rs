@@ -44,10 +44,15 @@ impl Daemon {
 
     pub async fn run(&mut self) -> anyhow::Result<()> {
         info!("SupplyGuard daemon starting...");
+        info!("Config: {} workers, scan_interval: {}ms", 
+              self.config.scanning.parallel_workers, 
+              self.config.monitoring.scan_interval_ms);
 
         // Create worker pool
         let num_workers = self.config.scanning.parallel_workers;
         let mut handles = Vec::new();
+        
+        info!("Creating {} worker tasks...", num_workers);
 
         for worker_id in 0..num_workers {
             let scanner = Arc::clone(&self.scanner);
@@ -75,10 +80,45 @@ impl Daemon {
         }
 
         info!("Started {} scanner workers", num_workers);
+        info!("Daemon is now running and monitoring for file changes...");
+
+        // Spawn a heartbeat task to verify daemon is alive
+        let heartbeat_handle = tokio::spawn({
+            let mut interval = tokio::time::interval(Duration::from_secs(30));
+            async move {
+                loop {
+                    interval.tick().await;
+                    info!("Daemon heartbeat - still running");
+                }
+            }
+        });
 
         // Wait for shutdown signal
-        let _ = self.shutdown_rx.recv().await;
-        info!("Shutdown signal received, waiting for workers to finish...");
+        loop {
+            match self.shutdown_rx.recv().await {
+                Ok(_) => {
+                    info!("Shutdown signal received, waiting for workers to finish...");
+                    break;
+                }
+                Err(tokio::sync::broadcast::error::RecvError::Closed) => {
+                    error!("Shutdown channel closed unexpectedly. This should not happen.");
+                    warn!("Daemon will continue running - heartbeat will keep it alive");
+                    // Keep running - don't exit. The heartbeat task will keep the process alive.
+                    // Wait a bit and log - this keeps the loop alive
+                    tokio::time::sleep(Duration::from_secs(60)).await;
+                    info!("Daemon still running (channel was closed but process continues)");
+                    continue;
+                }
+                Err(tokio::sync::broadcast::error::RecvError::Lagged(_)) => {
+                    // Lagged means we missed messages but channel is still open
+                    // Continue waiting
+                    continue;
+                }
+            }
+        }
+        
+        // Cancel heartbeat when shutting down
+        heartbeat_handle.abort();
 
         // Give workers time to finish (10 second timeout)
         tokio::select! {

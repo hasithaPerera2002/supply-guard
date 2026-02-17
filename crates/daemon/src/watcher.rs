@@ -27,7 +27,7 @@ impl FileWatcher {
         let event_tx = self.event_tx.clone();
         let ignored_paths = self.ignored_paths.clone();
 
-        let watcher = notify::recommended_watcher(move |res: notify::Result<Event>| {
+        let watcher = match notify::recommended_watcher(move |res: notify::Result<Event>| {
             match res {
                 Ok(event) => {
                     for path in &event.paths {
@@ -67,7 +67,14 @@ impl FileWatcher {
                     error!("Watcher error: {}", e);
                 }
             }
-        })?;
+        }) {
+            Ok(w) => w,
+            Err(e) => {
+                error!("Failed to create file watcher: {}", e);
+                warn!("Daemon will continue without file watching - manual scans will still work");
+                return Ok(()); // Don't fail startup if watcher can't be created
+            }
+        };
 
         *watcher_guard = Some(watcher);
 

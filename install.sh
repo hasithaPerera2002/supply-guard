@@ -65,6 +65,13 @@ sleep 2
 if sudo launchctl list | grep -q supplyguard; then
     echo "✓ SupplyGuard installed and running"
     supplyguard status
+    echo ""
+    echo "Checking logs for any errors..."
+    echo "--- Error log (last 20 lines) ---"
+    sudo tail -20 /var/log/supplyguard/error.log 2>/dev/null || echo "No error log found"
+    echo ""
+    echo "--- Daemon log (last 20 lines) ---"
+    sudo tail -20 /var/log/supplyguard/daemon.log 2>/dev/null || echo "No daemon log found"
 else
     echo "✗ Installation failed"
     exit 1
