@@ -26,7 +26,7 @@ impl MacOSNotifier {
 
         let (title, body, sound) = match threat.severity {
             Severity::Critical => (
-                "⚠️ Supply Chain Threat - CRITICAL",
+                "⚠️ Supply Chain Threat - CRITICAL".to_string(),
                 format!(
                     "{} detected in {}\n{}",
                     threat.threat_type.as_str(),
@@ -38,7 +38,7 @@ impl MacOSNotifier {
                 Some("Basso"), // System alert sound
             ),
             Severity::High => (
-                "🔍 Suspicious Code Detected",
+                "🔍 Suspicious Code Detected".to_string(),
                 format!(
                     "{} in {}\n{}",
                     threat.threat_type.as_str(),
@@ -50,7 +50,7 @@ impl MacOSNotifier {
                 None,
             ),
             Severity::Medium => (
-                "🔍 Suspicious Code Detected",
+                "🔍 Suspicious Code Detected".to_string(),
                 format!(
                     "{} in {}",
                     threat.threat_type.as_str(),
@@ -67,14 +67,14 @@ impl MacOSNotifier {
             }
         };
 
-        let mut notification = Notification::new()
-            .summary(&title)
-            .body(&body)
-            .appname("SupplyGuard")
-            .timeout(notify_rust::Timeout::Never);
+        let mut notification = Notification::new();
+        notification.summary(&title);
+        notification.body(&body);
+        notification.appname("SupplyGuard");
+        notification.timeout(notify_rust::Timeout::Never);
 
         if let Some(sound_name) = sound {
-            notification = notification.sound_name(sound_name);
+            notification.sound_name(sound_name);
         }
 
         match notification.show() {

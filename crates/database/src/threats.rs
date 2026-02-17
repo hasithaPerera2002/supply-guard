@@ -3,7 +3,7 @@ use rusqlite::{params, Connection, Result as SqlResult};
 use shared::{Severity, ThreatResult, ThreatType};
 use std::path::PathBuf;
 use std::sync::Mutex;
-use tracing::{debug, error, info};
+use tracing::info;
 
 pub struct ThreatDatabase {
     conn: Mutex<Connection>,
@@ -14,7 +14,7 @@ impl ThreatDatabase {
         // Create parent directory if it doesn't exist
         if let Some(parent) = db_path.parent() {
             std::fs::create_dir_all(parent)
-                .map_err(|e| rusqlite::Error::InvalidPath(db_path.to_path_buf()))?;
+                .map_err(|_e| rusqlite::Error::InvalidPath(db_path.to_path_buf()))?;
         }
 
         let conn = Connection::open(db_path)?;

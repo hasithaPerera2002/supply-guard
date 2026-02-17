@@ -6,6 +6,9 @@ echo "Installing SupplyGuard..."
 # Build release binary
 cargo build --release
 
+# Create /usr/local/bin if it doesn't exist
+sudo mkdir -p /usr/local/bin
+
 # Copy binary
 sudo cp target/release/supplyguard /usr/local/bin/
 sudo chown root:wheel /usr/local/bin/supplyguard

@@ -1,5 +1,4 @@
 use std::sync::atomic::{AtomicBool, Ordering};
-use std::sync::Arc;
 use tokio::sync::broadcast;
 use tracing::info;
 
@@ -20,6 +19,7 @@ pub fn setup_shutdown_handler(shutdown_tx: broadcast::Sender<()>) -> anyhow::Res
     Ok(())
 }
 
+#[allow(dead_code)]
 pub fn should_shutdown() -> bool {
     SHUTDOWN.load(Ordering::SeqCst)
 }

@@ -3,7 +3,7 @@ use chrono::Utc;
 use database::{CacheDatabase, ThreatDatabase};
 use notifier::MacOSNotifier;
 use scanner::{cache::ScanCache, ScannerEngine};
-use shared::{Config, FileEvent, Severity};
+use shared::{Config, FileEvent};
 use std::path::PathBuf;
 use std::sync::Arc;
 use std::time::{Duration, Instant};
@@ -208,7 +208,7 @@ impl Daemon {
     async fn quarantine_file(
         config: &Config,
         path: &PathBuf,
-        threat_id: Option<i64>,
+        _threat_id: Option<i64>,
     ) -> anyhow::Result<()> {
         let quarantine_dir = config.quarantine_path();
         std::fs::create_dir_all(&quarantine_dir)?;

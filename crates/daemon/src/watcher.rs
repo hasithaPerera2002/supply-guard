@@ -72,11 +72,11 @@ impl FileWatcher {
         *watcher_guard = Some(watcher);
 
         // Watch all paths
-        let watcher_guard = watcher_guard.as_ref().unwrap();
+        let watcher_ref = watcher_guard.as_mut().unwrap();
         for path in paths {
             if path.exists() {
                 info!("Watching path: {}", path.display());
-                watcher_guard.watch(&path, RecursiveMode::Recursive)?;
+                watcher_ref.watch(&path, RecursiveMode::Recursive)?;
             } else {
                 warn!("Path does not exist, skipping: {}", path.display());
             }

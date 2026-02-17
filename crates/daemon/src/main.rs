@@ -389,7 +389,7 @@ async fn list_quarantined() -> anyhow::Result<()> {
     Ok(())
 }
 
-async fn restore_quarantined(id: i64) -> anyhow::Result<()> {
+async fn restore_quarantined(_id: i64) -> anyhow::Result<()> {
     println!("Restore functionality not yet implemented");
     Ok(())
 }

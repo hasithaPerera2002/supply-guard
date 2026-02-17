@@ -1,6 +1,6 @@
 use crate::cache::ScanCache;
 use crate::detectors::{all_detectors, Detector};
-use shared::{ScanResult, ScannerError, ThreatResult};
+use shared::{ScanResult, ScannerError};
 use std::path::Path;
 use std::time::Instant;
 use tracing::{debug, info, warn};
@@ -92,8 +92,9 @@ impl ScannerEngine {
         }
 
         let duration_ms = start.elapsed().as_millis() as u64;
+        let is_clean = all_threats.is_empty();
         
-        if !all_threats.is_empty() {
+        if !is_clean {
             info!("Found {} threats in {} ({}ms)", all_threats.len(), path.display(), duration_ms);
         } else {
             debug!("Scanned {} - clean ({}ms)", path.display(), duration_ms);
@@ -103,7 +104,7 @@ impl ScannerEngine {
             path: path.to_path_buf(),
             threats: all_threats,
             scan_duration_ms: duration_ms,
-            is_clean: all_threats.is_empty(),
+            is_clean,
         })
     }
 

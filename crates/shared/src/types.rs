@@ -90,7 +90,7 @@ pub struct FileEvent {
     pub event_type: FileEventType,
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub enum FileEventType {
     Created,
     Modified,
