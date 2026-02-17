@@ -305,13 +305,21 @@ async fn start_daemon() -> anyhow::Result<()> {
     } else {
         eprintln!("File watching set up successfully");
     }
+    
+    // Force flush to ensure logs are written
+    use std::io::Write;
+    let _ = std::io::stderr().flush();
+    eprintln!("Flushed stderr, continuing to PID file writing...");
 
     // Write PID file
     info!("Writing PID file...");
+    eprintln!("About to write PID file...");
     write_pid_file()?;
+    eprintln!("PID file written successfully");
     info!("PID file written: {} (PID: {})", pid_file_path().display(), std::process::id());
 
     // Create and run daemon
+    eprintln!("About to create Daemon struct...");
     let mut daemon = Daemon::new(
         config,
         scanner,
@@ -321,8 +329,10 @@ async fn start_daemon() -> anyhow::Result<()> {
         event_rx,
         shutdown_rx,
     );
+    eprintln!("Daemon struct created successfully");
 
     info!("=== About to enter daemon.run() - this should block forever ===");
+    eprintln!("About to call daemon.run().await - this should block forever...");
     // Run daemon (blocks until shutdown)
     // This should block forever until shutdown signal is received
     match daemon.run().await {
@@ -386,7 +396,43 @@ async fn stop_daemon() -> anyhow::Result<()> {
 
 async fn show_status() -> anyhow::Result<()> {
     let pid = read_pid_file().ok();
-    let is_running = pid.map(|p| is_process_running(p)).unwrap_or(false);
+    
+    // Check if process is running - try multiple methods for reliability
+    let is_running = if let Some(pid) = pid {
+        // Method 1: Direct PID check
+        let pid_running = is_process_running(pid);
+        
+        // Method 2: Check via launchctl (for system LaunchDaemons)
+        let launchctl_running = std::process::Command::new("launchctl")
+            .args(&["print", "system/com.supplyguard.daemon"])
+            .output()
+            .map(|output| {
+                if output.status.success() {
+                    // Parse output to check if PID matches
+                    let output_str = String::from_utf8_lossy(&output.stdout);
+                    output_str.contains(&format!("pid = {}", pid))
+                } else {
+                    false
+                }
+            })
+            .unwrap_or(false);
+        
+        // Method 3: Check if any supplyguard process is running
+        let ps_running = std::process::Command::new("pgrep")
+            .args(&["-f", "supplyguard start"])
+            .output()
+            .map(|output| output.status.success())
+            .unwrap_or(false);
+        
+        pid_running || launchctl_running || ps_running
+    } else {
+        // No PID file - check if process exists anyway
+        std::process::Command::new("pgrep")
+            .args(&["-f", "supplyguard start"])
+            .output()
+            .map(|output| output.status.success())
+            .unwrap_or(false)
+    };
 
     println!("Status: {}", if is_running { "Running" } else { "Stopped" });
     

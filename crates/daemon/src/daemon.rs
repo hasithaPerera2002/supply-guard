@@ -43,58 +43,83 @@ impl Daemon {
     }
 
     pub async fn run(&mut self) -> anyhow::Result<()> {
+        eprintln!("daemon.run() called - entering main loop");
         info!("SupplyGuard daemon starting...");
         info!("Config: {} workers, scan_interval: {}ms", 
               self.config.scanning.parallel_workers, 
               self.config.monitoring.scan_interval_ms);
+        eprintln!("About to create worker tasks...");
 
         // Create worker pool
         let num_workers = self.config.scanning.parallel_workers;
         let mut handles = Vec::new();
         
         info!("Creating {} worker tasks...", num_workers);
+        eprintln!("Creating {} worker tasks...", num_workers);
 
         for worker_id in 0..num_workers {
+            eprintln!("Creating worker {}...", worker_id);
             let scanner = Arc::clone(&self.scanner);
             let threat_db = Arc::clone(&self.threat_db);
             let cache_db = Arc::clone(&self.cache_db);
             let notifier = Arc::clone(&self.notifier);
-            let mut event_rx = self.event_rx.clone();
-            let mut shutdown_rx = self.shutdown_rx.resubscribe();
+            eprintln!("Worker {} - cloned Arc references", worker_id);
+            // Note: async_channel::Receiver doesn't implement Clone
+            // Each worker needs its own receiver, so we need to share the sender instead
+            // For now, we'll create a new receiver from the same channel
+            // Actually, we can't clone receivers - we need to rethink this architecture
+            // Let's use the same receiver for all workers (they'll compete for messages)
+            let event_rx = self.event_rx.clone();
+            let shutdown_rx = self.shutdown_rx.resubscribe();
+            eprintln!("Worker {} - got channels", worker_id);
             let config = self.config.clone();
+            eprintln!("Worker {} - cloned config", worker_id);
 
+            eprintln!("Worker {} - about to spawn tokio task", worker_id);
             let handle = tokio::spawn(async move {
+                eprintln!("Worker {} task started", worker_id);
                 Self::worker_loop(
                     worker_id,
                     scanner,
                     threat_db,
                     cache_db,
                     notifier,
-                    &mut event_rx,
-                    &mut shutdown_rx,
+                    event_rx,
+                    shutdown_rx,
                     config,
                 ).await;
+                eprintln!("Worker {} task exited", worker_id);
             });
+            eprintln!("Worker {} task spawned", worker_id);
 
             handles.push(handle);
         }
+        eprintln!("All {} workers created", num_workers);
 
         info!("Started {} scanner workers", num_workers);
+        eprintln!("Started {} scanner workers", num_workers);
         info!("Daemon is now running and monitoring for file changes...");
+        eprintln!("Daemon is now running and monitoring for file changes...");
 
         // Spawn a heartbeat task to verify daemon is alive
+        eprintln!("About to spawn heartbeat task...");
         let heartbeat_handle = tokio::spawn({
             let mut interval = tokio::time::interval(Duration::from_secs(30));
             async move {
+                eprintln!("Heartbeat task started");
                 loop {
                     interval.tick().await;
+                    eprintln!("Daemon heartbeat - still running");
                     info!("Daemon heartbeat - still running");
                 }
             }
         });
+        eprintln!("Heartbeat task spawned");
 
         // Wait for shutdown signal
+        eprintln!("About to wait for shutdown signal (this should block forever)...");
         loop {
+            eprintln!("Waiting for shutdown signal...");
             match self.shutdown_rx.recv().await {
                 Ok(_) => {
                     info!("Shutdown signal received, waiting for workers to finish...");
@@ -144,8 +169,8 @@ impl Daemon {
         threat_db: Arc<ThreatDatabase>,
         cache_db: Arc<CacheDatabase>,
         notifier: Arc<MacOSNotifier>,
-        event_rx: &mut Receiver<FileEvent>,
-        shutdown_rx: &mut broadcast::Receiver<()>,
+        event_rx: Receiver<FileEvent>,
+        mut shutdown_rx: broadcast::Receiver<()>,
         config: Config,
     ) {
         info!("Worker {} started", worker_id);
