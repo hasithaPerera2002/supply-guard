@@ -95,6 +95,24 @@ enum ConfigCommands {
     Init,
 }
 
+fn print_logo() {
+    println!("\x1b[36m");
+    println!("  ╔═══════════════════════════════════════════════════════════╗");
+    println!("  ║                                                           ║");
+    println!("  ║   \x1b[1m\x1b[33m███████╗██╗   ██╗██████╗ ██╗     ██╗    ██╗\x1b[0m\x1b[36m   ║");
+    println!("  ║   \x1b[1m\x1b[33m██╔════╝██║   ██║██╔══██╗██║     ██║    ██║\x1b[0m\x1b[36m   ║");
+    println!("  ║   \x1b[1m\x1b[33m███████╗██║   ██║██████╔╝██║     ██║ █╗ ██║\x1b[0m\x1b[36m   ║");
+    println!("  ║   \x1b[1m\x1b[33m╚════██║██║   ██║██╔═══╝ ██║     ██║███╗██║\x1b[0m\x1b[36m   ║");
+    println!("  ║   \x1b[1m\x1b[33m███████║╚██████╔╝██║     ███████╗╚███╔███╔╝\x1b[0m\x1b[36m   ║");
+    println!("  ║   \x1b[1m\x1b[33m╚══════╝ ╚═════╝ ╚═╝     ╚══════╝ ╚══╝╚══╝ \x1b[0m\x1b[36m   ║");
+    println!("  ║                                                           ║");
+    println!("  ║   \x1b[32m🛡️  Supply Chain Attack Detection & Protection\x1b[0m\x1b[36m   ║");
+    println!("  ║   \x1b[90m              Real-time Threat Monitoring\x1b[0m\x1b[36m              ║");
+    println!("  ║                                                           ║");
+    println!("  ╚═══════════════════════════════════════════════════════════╝");
+    println!("\x1b[0m");
+}
+
 #[tokio::main]
 async fn main() {
     // Set up panic handler to log panics
@@ -105,15 +123,30 @@ async fn main() {
 
     let cli = Cli::parse();
 
-    // Initialize logging - ensure it writes to stderr (which launchd captures)
+    // Initialize logging with colors - ensure it writes to stderr (which launchd captures)
     tracing_subscriber::fmt()
         .with_env_filter(EnvFilter::from_default_env())
         .with_writer(std::io::stderr)
+        .with_ansi(true) // Enable ANSI colors
+        .with_target(true)
+        .with_level(true)
+        .with_file(true)
+        .with_line_number(true)
         .init();
     
     // Force flush stderr to ensure logs are written immediately
     use std::io::Write;
     let _ = std::io::stderr().flush();
+    
+    // Print logo for interactive commands (not when running as daemon)
+    match &cli.command {
+        Commands::Start => {
+            // Don't print logo when starting daemon (runs in background)
+        }
+        _ => {
+            print_logo();
+        }
+    }
     
     // Log immediately to verify logging works
     eprintln!("=== SupplyGuard starting ===");
@@ -434,22 +467,26 @@ async fn show_status() -> anyhow::Result<()> {
             .unwrap_or(false)
     };
 
-    println!("Status: {}", if is_running { "Running" } else { "Stopped" });
+    // Colored status output
+    let status_color = if is_running { "\x1b[32m" } else { "\x1b[31m" }; // Green for Running, Red for Stopped
+    let reset_color = "\x1b[0m";
+    let status_text = if is_running { "Running" } else { "Stopped" };
+    println!("Status: {}{}{}", status_color, status_text, reset_color);
     
     if let Some(pid) = pid {
-        println!("PID: {}", pid);
+        println!("PID: \x1b[36m{}\x1b[0m", pid); // Cyan for PID
     }
 
-    // Show statistics
+    // Show statistics with colors
     let config = Config::load()?;
     let db_path = config.database_path();
     let threat_db = ThreatDatabase::new(&db_path)?;
     let (total, unresolved, quarantined) = threat_db.get_statistics()?;
 
-    println!("\nStatistics:");
-    println!("  Total threats detected: {}", total);
-    println!("  Unresolved threats: {}", unresolved);
-    println!("  Quarantined files: {}", quarantined);
+    println!("\n\x1b[1mStatistics:\x1b[0m"); // Bold for "Statistics"
+    println!("  Total threats detected: \x1b[33m{}\x1b[0m", total); // Yellow
+    println!("  Unresolved threats: \x1b[31m{}\x1b[0m", unresolved); // Red
+    println!("  Quarantined files: \x1b[35m{}\x1b[0m", quarantined); // Magenta
 
     Ok(())
 }
@@ -458,24 +495,33 @@ async fn scan_directory(path: PathBuf) -> anyhow::Result<()> {
     let config = Config::load()?;
     let scanner = ScannerEngine::new(config.scanning.max_file_size_mb);
     
-    println!("Scanning {}...", path.display());
+    println!("\x1b[36mScanning {}...\x1b[0m", path.display()); // Cyan
     let results = scanner.scan_directory(&path).await?;
 
     let mut threat_count = 0;
     for result in results {
         if !result.is_clean {
             threat_count += result.threats.len();
-            println!("\n⚠️  Threats found in {}:", result.path.display());
+            println!("\n\x1b[31m⚠️  Threats found in {}:\x1b[0m", result.path.display()); // Red
             for threat in result.threats {
-                println!("  [{}] {}: {}", threat.severity.as_str(), threat.threat_type.as_str(), threat.context);
+                let severity_color = match threat.severity {
+                    shared::Severity::Critical => "\x1b[31m", // Red
+                    shared::Severity::High => "\x1b[33m",     // Yellow
+                    shared::Severity::Medium => "\x1b[35m",  // Magenta
+                    shared::Severity::Low => "\x1b[36m",      // Cyan
+                };
+                println!("  [{}] {}: {}", 
+                    format!("{}{}\x1b[0m", severity_color, threat.severity.as_str()),
+                    threat.threat_type.as_str(), 
+                    threat.context);
             }
         }
     }
 
     if threat_count == 0 {
-        println!("✓ No threats found");
+        println!("\x1b[32m✓ No threats found\x1b[0m"); // Green
     } else {
-        println!("\nTotal threats: {}", threat_count);
+        println!("\n\x1b[1mTotal threats: \x1b[31m{}\x1b[0m", threat_count); // Bold + Red
     }
 
     Ok(())
@@ -488,17 +534,25 @@ async fn list_threats(limit: i32) -> anyhow::Result<()> {
     let threats = threat_db.get_recent_threats(limit)?;
 
     if threats.is_empty() {
-        println!("No threats found");
+        println!("\x1b[32mNo threats found\x1b[0m"); // Green
         return Ok(());
     }
 
-    println!("Recent threats:");
+    println!("\x1b[1mRecent threats:\x1b[0m"); // Bold
     for threat in threats {
-        println!("\n[{}] {}", threat.severity.as_str(), threat.threat_type.as_str());
-        println!("  File: {}", threat.file_path.display());
-        println!("  Pattern: {}", threat.pattern_name);
-        println!("  Context: {}", threat.context);
-        println!("  Time: {}", threat.timestamp.format("%Y-%m-%d %H:%M:%S"));
+        let severity_color = match threat.severity {
+            shared::Severity::Critical => "\x1b[31m", // Red
+            shared::Severity::High => "\x1b[33m",     // Yellow
+            shared::Severity::Medium => "\x1b[35m",  // Magenta
+            shared::Severity::Low => "\x1b[36m",      // Cyan
+        };
+        println!("\n[{}] \x1b[1m{}\x1b[0m", 
+            format!("{}{}\x1b[0m", severity_color, threat.severity.as_str()),
+            threat.threat_type.as_str());
+        println!("  \x1b[36mFile:\x1b[0m {}", threat.file_path.display()); // Cyan label
+        println!("  \x1b[36mPattern:\x1b[0m {}", threat.pattern_name);
+        println!("  \x1b[36mContext:\x1b[0m {}", threat.context);
+        println!("  \x1b[36mTime:\x1b[0m {}", threat.timestamp.format("%Y-%m-%d %H:%M:%S"));
     }
 
     Ok(())
@@ -511,17 +565,17 @@ async fn list_quarantined() -> anyhow::Result<()> {
     let quarantined = threat_db.get_quarantined()?;
 
     if quarantined.is_empty() {
-        println!("No quarantined files");
+        println!("\x1b[32mNo quarantined files\x1b[0m"); // Green
         return Ok(());
     }
 
-    println!("Quarantined files:");
+    println!("\x1b[1mQuarantined files:\x1b[0m"); // Bold
     for (id, original, quarantine, threat_id) in quarantined {
-        println!("\nID: {}", id);
-        println!("  Original: {}", original.display());
-        println!("  Quarantine: {}", quarantine.display());
+        println!("\n\x1b[33mID:\x1b[0m {}", id); // Yellow label
+        println!("  \x1b[36mOriginal:\x1b[0m {}", original.display()); // Cyan label
+        println!("  \x1b[35mQuarantine:\x1b[0m {}", quarantine.display()); // Magenta label
         if let Some(tid) = threat_id {
-            println!("  Threat ID: {}", tid);
+            println!("  \x1b[31mThreat ID:\x1b[0m {}", tid); // Red label
         }
     }
 
@@ -538,7 +592,7 @@ async fn add_whitelist(pattern: String, reason: Option<String>) -> anyhow::Resul
     let db_path = config.database_path();
     let threat_db = ThreatDatabase::new(&db_path)?;
     threat_db.add_whitelist(&pattern, reason.as_deref())?;
-    println!("Added whitelist pattern: {}", pattern);
+    println!("\x1b[32m✓ Added whitelist pattern:\x1b[0m \x1b[36m{}\x1b[0m", pattern); // Green checkmark, cyan pattern
     Ok(())
 }
 
@@ -551,7 +605,7 @@ async fn show_config() -> anyhow::Result<()> {
 async fn init_config() -> anyhow::Result<()> {
     let config = Config::default();
     config.save()?;
-    println!("Configuration initialized at {}", Config::config_path()?.display());
+    println!("\x1b[32m✓ Configuration initialized at\x1b[0m \x1b[36m{}\x1b[0m", Config::config_path()?.display()); // Green checkmark, cyan path
     Ok(())
 }
 
