@@ -1269,7 +1269,9 @@ dependencies = [
  "serde_yaml",
  "sha2",
  "shared",
+ "tempfile",
  "tokio",
+ "toml",
  "tracing",
 ]
 

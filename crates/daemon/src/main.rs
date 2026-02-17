@@ -800,7 +800,7 @@ fn update_shell_path(enable: bool) -> anyhow::Result<()> {
     use std::fs;
     
     let home = std::env::var("HOME")
-        .ok_or_else(|| anyhow::anyhow!("HOME environment variable not set"))?;
+        .map_err(|_| anyhow::anyhow!("HOME environment variable not set"))?;
     
     let shell_configs = vec![
         PathBuf::from(&home).join(".zshrc"),

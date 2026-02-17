@@ -137,10 +137,10 @@ impl ShellConfigDetector {
 
         let curl_wget_pipe = CURL_WGET_PIPE.get_or_init(|| Regex::new(r"(curl|wget)\s+.*\s*\|\s*(sh|bash|zsh|fish)").unwrap());
         let base64_decode1 = BASE64_DECODE1.get_or_init(|| Regex::new(r"base64\s+-d.*\s*\|\s*(sh|bash|zsh|fish|python|perl)").unwrap());
-        let base64_decode2 = BASE64_DECODE2.get_or_init(|| Regex::new(r"echo\s+['\"].*['\"]\s*\|\s*base64\s+-d.*\s*\|\s*(sh|bash)").unwrap());
-        let path_prepend1 = PATH_PREPEND1.get_or_init(|| Regex::new(r"export\s+PATH=['\"]?([^'\"]*[:/](tmp|var/tmp|\.\w+|/dev|/proc)[^'\"]*[:/]|.*[:/](tmp|var/tmp|\.\w+|/dev|/proc))").unwrap());
-        let path_prepend2 = PATH_PREPEND2.get_or_init(|| Regex::new(r"PATH=['\"]?([^'\"]*[:/](tmp|var/tmp|\.\w+|/dev|/proc)[^'\"]*[:/]|.*[:/](tmp|var/tmp|\.\w+|/dev|/proc))").unwrap());
-        let alias_pattern = ALIAS_PATTERN.get_or_init(|| Regex::new(r"alias\s+(\w+)=\s*['\"](.*)['\"]").unwrap());
+        let base64_decode2 = BASE64_DECODE2.get_or_init(|| Regex::new(r#"echo\s+["'].*["']\s*\|\s*base64\s+-d.*\s*\|\s*(sh|bash)"#).unwrap());
+        let path_prepend1 = PATH_PREPEND1.get_or_init(|| Regex::new(r#"export\s+PATH=["']?([^"']*[:/](tmp|var/tmp|\.\w+|/dev|/proc)[^"']*[:/]|.*[:/](tmp|var/tmp|\.\w+|/dev|/proc))"#).unwrap());
+        let path_prepend2 = PATH_PREPEND2.get_or_init(|| Regex::new(r#"PATH=["']?([^"']*[:/](tmp|var/tmp|\.\w+|/dev|/proc)[^"']*[:/]|.*[:/](tmp|var/tmp|\.\w+|/dev|/proc))"#).unwrap());
+        let alias_pattern = ALIAS_PATTERN.get_or_init(|| Regex::new(r#"alias\s+(\w+)=\s*["'](.*)["']"#).unwrap());
         let background_proc = BACKGROUND_PROC.get_or_init(|| Regex::new(r"(&\s*$|nohup|disown)").unwrap());
         let reverse_shell1 = REVERSE_SHELL1.get_or_init(|| Regex::new(r"(nc\s+-e|bash\s+-i|/dev/tcp/|/dev/udp/)").unwrap());
         let reverse_shell2 = REVERSE_SHELL2.get_or_init(|| Regex::new(r"exec\s+.*(bash|sh|zsh).*>&.*<&").unwrap());
