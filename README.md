@@ -117,6 +117,14 @@ rm -rf ~/.supplyguard
 
 ## Usage
 
+### Prerequisites (for `scan-package` / interception)
+
+Package scanning and interception rely on the underlying package managers and a few standard tools being installed and available in `PATH`:
+
+- **npm scanning**: `npm`, `tar`
+- **pip scanning**: `pip`, `tar` and/or `unzip` (depending on sdist/wheel)
+- **cargo scanning**: `cargo`
+
 ### CLI Commands
 
 ```bash
@@ -138,7 +146,7 @@ supplyguard scan-package pip <package> [version]
 supplyguard scan-package cargo <package> [version]
 
 # Package manager interception (wrap npm, pip, cargo to scan before install)
-supplyguard intercept enable   # Install wrappers to /usr/local/bin
+supplyguard intercept enable   # Install wrappers to /usr/local/bin (may require sudo)
 supplyguard intercept disable  # Remove wrappers
 supplyguard intercept status   # Show which managers are intercepted
 
@@ -251,7 +259,13 @@ When interception is enabled, wrappers in `/usr/local/bin` shadow `npm`, `pip`, 
 6. If threats are found, the install is blocked and details are shown; you can confirm to proceed.
 7. If clean, the real package manager runs transparently.
 
-Use `supplyguard intercept enable` to install wrappers and prepend `/usr/local/bin` to PATH in your shell config. Use `supplyguard intercept disable` to remove them.
+**Notes:**
+
+- **Permissions**: Installing wrappers into `/usr/local/bin` commonly requires admin privileges. Use `sudo supplyguard intercept enable` if needed.
+- **Shell config changes**: `intercept enable` appends a PATH line to `~/.zshrc`, `~/.bashrc`, `~/.bash_profile`, and `~/.profile` so `/usr/local/bin` is first. Restart your shell (or `source` the relevant file) after enabling.
+- **Real binaries**: The wrappers attempt to locate the “real” `npm`/`pip`/`cargo` from common locations and then `exec` it with your original arguments.
+
+Use `supplyguard intercept enable` to install wrappers and update PATH. Use `supplyguard intercept disable` to remove the wrappers and PATH line.
 
 ## Configuration
 
@@ -409,7 +423,9 @@ Currently macOS only. Linux support is planned. Windows support would require si
 
 ### How does package manager interception work?
 
-Run `supplyguard intercept enable`. Wrapper scripts are installed to `/usr/local/bin` for `npm`, `pip`, and `cargo`. Your shell config is updated so `/usr/local/bin` is first in PATH. When you run `npm install <pkg>`, the wrapper calls `supplyguard scan-package npm <pkg>` first; if threats are found, the install is blocked unless you confirm. Use `supplyguard intercept disable` to remove the wrappers.
+Run `supplyguard intercept enable` (or `sudo supplyguard intercept enable` if `/usr/local/bin` isn’t writable). Wrapper scripts are installed to `/usr/local/bin` for `npm`, `pip`, and `cargo`, and your shell config is updated so `/usr/local/bin` is first in PATH.
+
+When you run `npm install <pkg>`, the wrapper calls `supplyguard scan-package npm <pkg> [version]` first; if threats are found, the install is blocked unless you confirm. Use `supplyguard intercept disable` to remove the wrappers and the PATH modification.
 
 ## Contributing
 
